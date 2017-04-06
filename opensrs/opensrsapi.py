@@ -135,8 +135,11 @@ class OpenSRS(object):
         return self._get_channel().make_request(msg)
 
     def make_contact(self, user, domain, **kw):
-        org_name = kw.get('orgname') or ' '.join([user.first_name,
+        org_name = user.org_name or ' '.join([user.first_name,
                                                   user.last_name])
+        # .eu domains require GB instead of UK as the country code
+        if domain.lower().endswith('.eu') and user.country == 'UK':
+            user.country = 'GB'
         return {
             'first_name': user.first_name,
             'last_name': user.last_name,
@@ -170,18 +173,24 @@ class OpenSRS(object):
     def _make_common_reg_attrs(self, domain, user, username, password,
                                reg_domain, **kw):
         contact = self.make_contact(user, domain, **kw)
+        admin = billing = tech = contact
+        if kw.get('admin'):
+            admin=self.make_contact(kw.get('admin'),domain, **kw)
+        if kw.get('billing'):
+            billing=self.make_contact(kw.get('billing'),domain, **kw)
+        if kw.get('tech'):
+            tech=self.make_contact(kw.get('tech'),domain, **kw)
+
         order_processing_method = kw.get(
             'order_processing_method', OrderProcessingMethods.SAVE)
-        # .eu domains require GB instead of UK as the country code
-        if domain.lower().endswith('.eu') and contact['country'] == 'UK':
-            contact['country'] = 'GB'
+
         attributes = {
             'auto_renew': '0',
             'contact_set': {
                 'owner': contact,
-                'admin': contact,
-                'billing': contact,
-                'tech': contact,
+                'admin': admin,
+                'billing': billing,
+                'tech': tech,
             },
             'custom_tech_contact': '1',
             'domain': domain,
@@ -308,12 +317,14 @@ class OpenSRS(object):
     def _register_domain(self, domain, purchase_period, user, user_id,
                          password, nameservers=None, private_reg=False,
                          reg_domain=None, extras=None,
-                         order_processing_method=OrderProcessingMethods.SAVE):
+                         order_processing_method=OrderProcessingMethods.SAVE,
+                         admin=None, billing=None, tech=None):
         extras = extras or {}
         attrs = self._make_domain_reg_attrs(
             domain, purchase_period, user, user_id, password, nameservers,
             private_reg, reg_domain,
-            order_processing_method=order_processing_method, **extras)
+            order_processing_method=order_processing_method, admin=admin,
+            billing=billing, tech=tech, **extras)
         if extras:
             attrs.update(extras)
 
@@ -341,10 +352,12 @@ class OpenSRS(object):
     @capture_transfer_failures
     def _transfer_domain(self, domain, user, user_id, password,
                          nameservers=None, reg_domain=None, extras=None,
-                         order_processing_method=OrderProcessingMethods.SAVE):
+                         order_processing_method=OrderProcessingMethods.SAVE,
+                         admin=None, billing=None, tech=None):
         attrs = self._make_domain_transfer_attrs(
             domain, user, user_id, password, nameservers, reg_domain,
-            order_processing_method=order_processing_method)
+            order_processing_method=order_processing_method, admin=admin,
+            billing=billing, tech=tech)
         if extras:
             attrs.update(extras)
 
@@ -385,16 +398,23 @@ class OpenSRS(object):
         return self._req(action='CHANGE', object='OWNERSHIP', cookie=cookie,
                          attributes=attributes)
 
-    def _set_domain_contacts(self, cookie, user, domain):
+    def _set_domain_contacts(self, cookie, user, domain, **kw):
         contact = self.make_contact(user, domain)
+        admin = billing = tech = contact
+        if kw.get('admin'):
+            admin=self.make_contact(kw.get('admin'),domain, **kw)
+        if kw.get('billing'):
+            billing=self.make_contact(kw.get('billing'),domain, **kw)
+        if kw.get('tech'):
+            tech=self.make_contact(kw.get('tech'),domain, **kw)
         attributes = {
             'affect_domains': '0',
             'data': 'contact_info',
             'contact_set': {
                 'owner': contact,
-                'admin': contact,
-                'billing': contact,
-                'tech': contact,
+                'admin': admin,
+                'billing': billing,
+                'tech': tech,
             },
         }
 
@@ -499,20 +519,24 @@ class OpenSRS(object):
     def create_pending_domain_registration(
             self, domain, purchase_period, user, user_id,
             password, nameservers=None, private_reg=False,
-            reg_domain=None, extras=None):
+            reg_domain=None, extras=None, admin=None, billing=None,
+            tech=None):
         return self._register_domain(
             domain, purchase_period, user, user_id, password,
             nameservers=nameservers, private_reg=private_reg,
-            reg_domain=reg_domain, extras=extras)
+            reg_domain=reg_domain, extras=extras, admin=admin,
+            billing=billing, tech=tech)
 
     def register_domain(self, domain, purchase_period, user, user_id,
                         password, nameservers=None, private_reg=False,
-                        reg_domain=None, extras=None):
+                        reg_domain=None, extras=None, admin=None, billing=None,
+                        tech=None):
         return self._register_domain(
             domain, purchase_period, user, user_id, password,
             nameservers=nameservers, private_reg=private_reg,
             reg_domain=reg_domain, extras=extras,
-            order_processing_method=OrderProcessingMethods.PROCESS)
+            order_processing_method=OrderProcessingMethods.PROCESS, admin=admin,
+            billing=billing, tech=tech)
 
     def process_pending(self, order_id, cancel=False):
         try:
@@ -607,17 +631,21 @@ class OpenSRS(object):
 
     def create_pending_domain_transfer(self, domain, user, user_id, password,
                                        nameservers=None, reg_domain=None,
-                                       extras=None):
+                                       extras=None, admin=None, billing=None,
+                                       tech=None):
         return self._transfer_domain(
             domain, user, user_id, password, nameservers=nameservers,
-            reg_domain=reg_domain, extras=extras)
+            reg_domain=reg_domain, extras=extras, admin=admin,
+            billing=billing, tech=tech)
 
     def transfer_domain(self, domain, user, user_id, password,
-                        nameservers=None, reg_domain=None, extras=None):
+                        nameservers=None, reg_domain=None, extras=None,
+                        admin=None, billing=None, tech=None):
         return self._transfer_domain(
             domain, user, user_id, password, nameservers=nameservers,
             reg_domain=reg_domain, extras=extras,
-            order_processing_method=OrderProcessingMethods.PROCESS)
+            order_processing_method=OrderProcessingMethods.PROCESS, admin=admin,
+            billing=billing, tech=tech)
 
     def list_transfers(self, transfer_id=None, start_date=None, end_date=None):
         rsp = self._get_transfers_in(transfer_id=transfer_id,
@@ -637,8 +665,10 @@ class OpenSRS(object):
         self._change_ownership(cookie, username, password, domain)
         return True
 
-    def set_contacts(self, cookie, user, domain):
-        self._set_domain_contacts(cookie, user, domain)
+    def set_contacts(self, cookie, user, domain, admin=None, billing=None,
+                        tech=None):
+        self._set_domain_contacts(cookie, user, domain, admin=admin,
+                                billing=billing, tech=tech)
         return True
 
     def get_transferred_away_domains(self, page, domain=None):
