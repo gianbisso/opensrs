@@ -37,5 +37,3 @@ nosetests.xml
 
 # test settings
 test_settings.py
-
-.Python
