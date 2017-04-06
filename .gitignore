@@ -39,3 +39,5 @@ nosetests.xml
 test_settings.py
 
 .Python
+include
+man
